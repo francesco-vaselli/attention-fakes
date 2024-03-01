@@ -1,6 +1,7 @@
 # reco columns for jets
 
-reco_columns: ["area",
+reco_columns: ["Pileup_nTrueInt",
+  "area",
   "bRegCorr",
   "bRegRes",
   "btagCSVV2",
@@ -39,3 +40,46 @@ reco_columns: ["area",
   "puIdDisc",
   "qgl",
   "rawFactor",]
+
+preprocess_ops : 
+  Pileup_nTrueInt: [null]
+  area: ["scale"]
+  bRegCorr: ["scale"]
+  bRegRes: ["scale"]
+  btagCSVV2: ["scale"]
+  btagDeepB: ["scale"]
+  btagDeepCvB: ["scale"]
+  btagDeepCvL: ["scale"]
+  btagDeepFlavB: ["scale"]
+  btagDeepFlavCvB: ["scale"]
+  btagDeepFlavCvL: ["scale"]
+  btagDeepFlavQG: ["scale"]
+  cRegCorr: ["scale"]
+  cRegRes: ["scale"]
+  chEmEF: ["scale"]
+  chFPV0EF: ["scale"]
+  chHEF: ["scale"]
+  cleanmask: ["smear", "scale"]
+  eta: ["scale"]
+  hadronFlavour: ["smear", "scale"]
+  hfadjacentEtaStripsSize: ["scale"]
+  hfcentralEtaStripSize: ["scale"]
+  hfsigmaEtaEta: ["scale"]
+  hfsigmaPhiPhi: ["scale"]
+  jetId: ["smear", "scale"]
+  mass: ["scale"]
+  muEF: ["scale"]
+  muonSubtrFactor: ["scale"]
+  nConstituents: ["smear", "scale"]
+  nElectrons: ["smear", "scale"]
+  nMuons: ["smear", "scale"]
+  neEmEF: ["scale"]
+  neHEF: ["scale"]
+  partonFlavour: ["smear", "scale"]
+  phi: ["scale"]
+  pt: ["scale"]
+  puId: ["smear", "scale"]
+  puIdDisc: ["scale"]
+  qgl: ["scale"]
+  rawFactor: ["scale"]
+  

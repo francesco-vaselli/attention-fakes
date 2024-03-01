@@ -5,6 +5,8 @@ import ROOT
 import yaml
 import awkward as ak
 import numpy as np
+import json
+from sklearn.preprocessing import StandardScaler
 
 
 ROOT.gInterpreter.Declare('''
@@ -67,11 +69,13 @@ def extract_jet_features(df, columns):
 
     columns_dtypes = {}
     for col in columns:
-        extracted = extracted.Define(f"FJet_{col}", f"Jet_{col}[JetMask]")
+        if col != "Pileup_nTrueInt":
+            extracted = extracted.Define(f"FJet_{col}", f"Jet_{col}[JetMask]")
 
     # check that FJet_col is present
     for col in columns:
-        assert f"FJet_{col}" in extracted.GetColumnNames(), f"FJet_{col} not present in the columns!!"
+        if col != "Pileup_nTrueInt":
+            assert f"FJet_{col}" in extracted.GetColumnNames(), f"FJet_{col} not present in the columns!!"
 
     # for each event we allow for max 10 fake jets, we pad those with less
     # max_len = 10
@@ -91,11 +95,11 @@ def get_numpy_array(df, columns):
     Returns:
         np.array: numpy array
     """
-    columns = [f"FJet_{col}" for col in columns]
+    columns = ["Pileup_nTrueInt"]+[f"FJet_{col}" for col in columns if col != "Pileup_nTrueInt"]
     ak_array = ak.from_rdataframe(df, columns=columns)
 
-    print(ak_array[1])
-    # print shapes
+    pu = np.asarray(ak_array["Pileup_nTrueInt"])
+    ak_array = ak.without_field(ak_array, "Pileup_nTrueInt")
 
     # pad the array with zeros
     max_len = 10
@@ -103,57 +107,100 @@ def get_numpy_array(df, columns):
 
     # convert to numpy
     np_array = np.asarray(ak.concatenate(ak.unzip(ak_array[:, np.newaxis]), axis=1))
+
+    # now reshape to have shape (len, 1)
+    pu = pu[:, np.newaxis]
+    print(pu.shape)
+    # pad the pileup to have shape (len, 10)
+    pu = np.repeat(pu, max_len, axis=1)
+    print(pu.shape)
+    # reshape into (len, 1, 10)
+    pu = pu[:, np.newaxis, :]
+
+    # now concat all to get (len, 1+39, 10)
+    np_array = np.concatenate((pu, np_array), axis=1)
     return np_array
 
+def preprocess_jet_features(np_array, preprocess_ops):
+    """preprocess the jet features
+        shape is (len, 10, 40) but most of the 10 jets are padded so we do not preprocess them
+
+    """
+    scaler = StandardScaler()
+    scaler_params = []
+    for (feature, col) in zip(range(np_array.shape[2]), preprocess_ops.keys()):
+        flat_data = np_array[:, :, feature].flatten()
+    
+        # Mask to identify non-padded values
+        mask = flat_data != -999
+        for op in preprocess_ops[col]:
+            if op == None:
+                continue
+            elif op == "smear":
+                # add uniform noise in [-0.5, 0.5] to the non-padded values
+                flat_data[mask] += np.random.rand(np.sum(mask)) - 0.5
+            elif op == "scale":
+                scaled_values = scaler.fit_transform(flat_data[mask].reshape(-1, 1)).flatten()
+                flat_data[mask] = scaled_values
+                mean = scaler.mean_[0]
+                scale = scaler.scale_[0]
+                scaler_params.append({'feature': col, 'mean': mean, 'std': scale})
+
+        np_array[:, :, feature] = flat_data.reshape(np_array.shape[0], np_array.shape[1])
+
+    # Save to a JSON file
+    with open('scaler_params.json', 'w') as f:
+        json.dump(scaler_params, f, indent=4)
+
+    return np_array
+
+
 #%%
-# def extract_jets(inputname, outputname, dict):
-ROOT.EnableImplicitMT()
-inputname= "/home/users/fvaselli/031C4ACC-DAA5-1640-9331-4B55F5716F04.root"
-print(f"Processing {inputname}...")
+def extract_jets(inputname, outputname):
+    ROOT.EnableImplicitMT()
+    inputname= "/home/users/fvaselli/031C4ACC-DAA5-1640-9331-4B55F5716F04.root"
+    print(f"Processing {inputname}...")
 
-# read columns from the yaml config
-with open("columns.yaml", "r") as file:
-    config = yaml.safe_load(file)
+    # read columns from the yaml config
+    with open("columns.yaml", "r") as file:
+        config = yaml.safe_load(file)
 
-columns = config["reco_columns"]
+    columns = config["reco_columns"]
 
-d = ROOT.RDataFrame("Events", inputname)
+    d = ROOT.RDataFrame("Events", inputname)
 
-d = extract_jet_features(d, columns)
+    d = extract_jet_features(d, columns)
 
-np_array = get_numpy_array(d, columns)
-print(np_array)
+    # columns = ["Pileup_nTrueInt"]+[f"FJet_{col}" for col in columns if col != "Pileup_nTrueInt"]
+    # ak_array = ak.from_rdataframe(d, columns=columns)
 
-# swap the 1, 2 axes
-np_array = np.swapaxes(np_array, 1, 2)
+    np_array = get_numpy_array(d, columns)
+    print(np_array)
+
+    # # swap the 1, 2 axes
+    np_array = np.swapaxes(np_array, 1, 2)
+
+    # check (len, :, 35), if all are -999, then remove the row
+    p_T = np_array[:, :, 35]
+    mask = p_T != -999
+    mask = np.any(mask, axis=1)
+    np_array = np_array[mask]
+    print(np_array.shape)
+    print(np_array[10])
+
+    # preprocess the data
+    preprocess_ops = config["preprocess_ops"]
+    np_array = preprocess_jet_features(np_array, preprocess_ops)
+    print(np_array[10])
+
+    # save the array
+    np.save(f"{outputname}.npy", np_array)
 # outputname = "test.root"
 # cols = [f"FJet_{col}" for col in columns]
 # d.Snapshot("MJets", outputname, cols)
 # cols = [f"FJet_{col}" for col in columns]
 # np_cols = d.AsNumpy(columns=cols)
 
-# print(np_cols)
-# # now np_cols is a dictonary on Np_array. just get the values and you are done
-# np_values = np_cols.values()
-# print(np_values)
-
-    # np_data = get_numpy_array(d, columns)
-
-
-
-    # n_match, n_reco = dict["RECOJET_GENJET"]
-
-    # n_match += d.Histo1D("MJet_ptRatio").GetEntries()
-    # n_reco += d.Histo1D("Jet_pt").GetEntries()
-
-    # dict["RECOJET_GENJET"] = (n_match, n_reco)
-
-    # cols = jet_cond + reco_columns
-
-    # d.Snapshot("MJets", outputname, cols)
-
-    # print(f"{outputname} written")
-
-# if __name__ == "__main__":
-#     extract_jets("/home/users/fvaselli/031C4ACC-DAA5-1640-9331-4B55F5716F04.root", "test", {})
+if __name__ == "__main__":
+    extract_jets("/home/users/fvaselli/031C4ACC-DAA5-1640-9331-4B55F5716F04.root", "test")
 # %%
