@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 from dataset import FakesDataset
 from model import FakesModel
+from cfm import ModelWrapper, MyAlphaTTargetConditionalFlowMatcher
 
 
 if __name__=="__main__":
@@ -22,7 +23,7 @@ if __name__=="__main__":
         model.parameters(),
         lr=0.001,
     )
-    FM = ConditionalFlowMatcher(sigma=0.001)
+    FM = MyAlphaTTargetConditionalFlowMatcher(sigma=0.0001, alpha=1)
     loss_val = []
     for j in range(10):
         print(f"Epoch {j}")
