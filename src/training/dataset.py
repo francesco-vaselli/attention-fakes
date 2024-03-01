@@ -6,8 +6,8 @@ import torch
 class FakesDataset(Dataset):
     def __init__(self, np_array):
         self.data = np_array
-        self.pu = self.data[:, 0, 0]
-        self.features = self.data[:, :, 1:]
+        self.pu = self.data[:, 0, 0] # review this maybe its [:, :, 0]
+        self.features = self.data[:, :, 1:] 
 
         # get the Number of fakes in the event
         self.nfakes = (self.features[:, :, 35] != -999).sum(axis=1)

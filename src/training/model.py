@@ -4,6 +4,7 @@ from dataset import FakesDataset
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 
+
 class FeedFoward(nn.Module):
     """ a simple linear layer followed by a non-linearity """
 
@@ -30,8 +31,8 @@ class FakesModel(nn.Module):
         self.mha1 = nn.MultiheadAttention(embed_size, n_heads, batch_first=True)
         self.mha2 = nn.MultiheadAttention(embed_size, n_heads, batch_first=True)
         # attention mask of shape (11, 11)
-        attention_mask = torch.triu(torch.ones(12, 12)).clone().detach().bool()
-        self.attention_mask = attention_mask[1:, :-1]
+        
+        # self.attention_mask = 
         # print(f"attention_mask: {self.attention_mask.shape}")
         # print(f"attention_mask: {self.attention_mask}")
         self.ln1 = nn.LayerNorm(embed_size)
@@ -44,9 +45,11 @@ class FakesModel(nn.Module):
         self.ln4 = nn.LayerNorm(embed_size)
         self.ffw4 = FeedFoward(embed_size)
         self.ln_f = nn.LayerNorm(embed_size)
-        self.output = nn.Linear(embed_size, output_size)
+        self.output = nn.Linear(embed_size, output_size)        
 
     def forward(self, x, pu, nfakes, toss, key_padding_mask):
+        attention_mask = torch.triu(torch.ones(x.shape[1]+2, x.shape[1]+2)).clone().detach().bool()
+        attention_mask = attention_mask[1:, :-1]
         # cat pu, nfakse and toss 
         start = torch.cat([pu.view(-1, 1), nfakes.view(-1, 1), toss.view(-1, 1)], dim=1)
         # input1
@@ -60,12 +63,13 @@ class FakesModel(nn.Module):
         x = torch.cat([start, x], dim=1)
         # print(f"xn: {x.shape}")
         # expand key padding mask with one False at the beginning of each sequence
-        key_padding_mask = torch.cat([torch.zeros(key_padding_mask.shape[0], 1, dtype=torch.bool), key_padding_mask], dim=1)
+        if key_padding_mask is not None:
+            key_padding_mask = torch.cat([torch.zeros(key_padding_mask.shape[0], 1, dtype=torch.bool), key_padding_mask], dim=1)
         # print(f"key_padding_mask: {key_padding_mask.shape}")
         # ln1
         x = self.ln1(x)
         # mha
-        x = x + self.mha1(x, x, x, key_padding_mask=key_padding_mask, attn_mask=self.attention_mask)[0]
+        x = x + self.mha1(x, x, x, key_padding_mask=key_padding_mask, attn_mask=attention_mask)[0]
         # print(f"mha1: {x.shape}")
         # print(f"mha1: {x}")
         # ffw1
@@ -79,6 +83,10 @@ class FakesModel(nn.Module):
         # output
         x = self.output(x)
         return x
+    
+
+    
+
 
 if __name__ == "__main__":
 
@@ -91,9 +99,11 @@ if __name__ == "__main__":
     print(f"Total parameters: {params}")
     outs = []
     for i, (features, pu, nfakes, toss, key_padding_mask) in enumerate(dataloader):
+        # features = features[:, :8, :]
+        # key_padding_mask = key_padding_mask[:, :8]
         out = model(features, pu, nfakes, toss, key_padding_mask)
         # print(f"batch {i}")
-        # print(f"out: {out.shape}")
+        print(f"out: {out.shape}")
         # print(f"out: {out}")
         outs.append(out)
         if i == 2:

@@ -16,6 +16,7 @@ if __name__=="__main__":
     dataset = FakesDataset(np_array)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     model = FakesModel(3, 39, 64, 2, 39)
+
     # print total parameters
     params = sum(p.numel() for p in model.parameters())
     print(f"Total parameters: {params}")
@@ -31,7 +32,7 @@ if __name__=="__main__":
         with tqdm(total=len(dataloader), position=0,  dynamic_ncols=True, ascii=True) as pbar:
             for i, (features, pu, nfakes, _, key_padding_mask) in enumerate(dataloader) :
                 optimizer.zero_grad()
-                x0 = torch.randn(features.shape[0], 10, 39)
+                x0 = torch.randn(features.shape[0], features.shape[1], 39)
                 t, xt, ut = FM.sample_location_and_conditional_flow(x0, features)
                 vt = model(xt, pu, nfakes, t, key_padding_mask)
 

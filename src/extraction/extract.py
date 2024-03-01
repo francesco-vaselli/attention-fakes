@@ -154,7 +154,38 @@ def preprocess_jet_features(np_array, preprocess_ops):
 
     return np_array
 
+def repeat_and_copy(np_array):
+    """repeats each array by the number of non-padded jets,
+    """
+    data = np_array
+    pu = data[:, :, 0]
+    features = data[:, :, 1:]
+    nfakes = (features[:, :, 35] != -999).sum(axis=1)
 
+    # Repeat each sequence and its features
+    repeated_features = np.repeat(features, repeats=10, axis=0)
+    repeated_pu = np.repeat(pu, repeats=10, axis=0)
+
+    input_sequences = []
+    target = []
+    pu_vals = []
+    for j in range(10):
+        target.append(repeated_features[j::10, j, :])
+        # print(repeated_features[j::10, j, :].shape)
+        pad_features = repeated_features[j::10, :, :]
+        pad_features[:, j, :] = -999
+        input_sequences.append(pad_features)
+    
+    # Convert to numpy arrays for efficiency in indexing during __getitem__
+    input_sequences = np.array(input_sequences)
+    target = np.array(target)
+
+    # concat repeated_pu and input_sequences
+    input_sequences = np.concatenate((repeated_pu, input_sequences), axis=2)
+
+    return input_sequences, target
+
+    
 #%%
 def extract_jets(inputname, outputname):
     ROOT.EnableImplicitMT()
@@ -179,6 +210,7 @@ def extract_jets(inputname, outputname):
 
     # # swap the 1, 2 axes
     np_array = np.swapaxes(np_array, 1, 2)
+    print(np_array.shape)
 
     # check (len, :, 35), if all are -999, then remove the row
     p_T = np_array[:, :, 35]
@@ -193,8 +225,13 @@ def extract_jets(inputname, outputname):
     np_array = preprocess_jet_features(np_array, preprocess_ops)
     print(np_array[10])
 
+    # repeat and copy
+    input_sequences, target = repeat_and_copy(np_array)
+    print(input_sequences[2, 0, :])
+    print(target[2, 0, :])
+
     # save the array
-    np.save(f"{outputname}.npy", np_array)
+    # np.save(f"{outputname}.npy", np_array)
 # outputname = "test.root"
 # cols = [f"FJet_{col}" for col in columns]
 # d.Snapshot("MJets", outputname, cols)

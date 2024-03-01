@@ -13,10 +13,12 @@ import torch
 import math
 import torch
 
-from torchcfm.conditional_flow_matching import ConditionalFlowMatcher, pad_t_like_x
+from torchcfm.conditional_flow_matching import ConditionalFlowMatcher
+from torchdiffeq import odeint
+
 
 class ModelWrapper(nn.Module):
-    def __init__(self, base_model, context_dim=6):
+    def __init__(self, base_model):
         """
         Wraps a base model to only evolve the first part of the input specifying a certain context using the model.
 
@@ -25,7 +27,7 @@ class ModelWrapper(nn.Module):
         """
         super(ModelWrapper, self).__init__()
         self.base_model = base_model.eval()
-        self.context_dim = context_dim
+        self.feature_size = base_model.feature_size
 
     def forward(self, t, x, **kwargs):
         """
@@ -33,22 +35,50 @@ class ModelWrapper(nn.Module):
 
         Args:
             t (torch.Tensor): The time tensor.
-            x (torch.Tensor): The input tensor: concatenation of [actual input, context].
+            x (torch.Tensor): The input tensor: concatenation of [actual input, padded pu, padded nfakes].
+            shape is [N, len+2, 39]
             **kwargs: Additional keyword arguments.
 
         Returns:
             torch.Tensor: The output tensor.
         """
-        xt, context = x[:, :-self.context_dim], x[:, -self.context_dim:]
-        t_broadcasted = t.expand(x.shape[0], 1)
-        # Only evolve xt using the model
-        dxt_dt = self.base_model(xt, context=context, flow_time=t_broadcasted)
+        seq_len = x.shape[1]
+        xt, pu, nfakes, curr_obj = x[:, :seq_len-3, :], x[:, seq_len-2, 0], x[:, seq_len -1, 0], x[:, seq_len, 0]
+        # t_broadcasted = t.expand(x.shape[0], 1)
+        # Only evolve xt using the model, key_padding mask is None
+        dxt_dt = self.base_model(xt, pu, nfakes, t, None)
 
         # Concatenate the derivatives of xt with zeros for context to keep their values unchanged
-        zeros_for_context = torch.zeros_like(context)
-        dx_dt = torch.cat([dxt_dt, zeros_for_context], dim=-1)
+        zeros_for_context = torch.zeros_like(x)
+
+        dx_dt = torch.cat([dxt_dt, zeros_for_context], dim=1)
 
         return dx_dt
+    
+    def generate(self, pu, nfakes, max_len=10, timesteps=100, solver="euler"):
+        t = torch.linspace(0, 1, timesteps)
+        for i in range(nfakes.shape[0]):
+            curr_obj = 0
+            for j in nfakes[i]:
+                if j > max_len:
+                    j = max_len
+                x = torch.randn(1, j, self.feature_size)
+                pu_zeros = torch.zeros_like(x)
+                nfakes_zeros = torch.zeros_like(x)
+                curr_obj_zeros = torch.zeros_like(x)
+                pu_zeros[:, :, 0] = pu[i]
+                nfakes_zeros[:, :, 0] = j
+                curr_obj_zeros[:, :, 0] = curr_obj
+                initial_conditions = torch.cat([x, pu_zeros, nfakes_zeros], dim=1)
+                sample = odeint(self,
+                                initial_conditions,
+                                t,
+                                atol=1e-5,
+                                rtol=1e-5,
+                                method=solver,
+                                )
+                print(sample.shape)
+        
 
 
 def pad_t_like_x(t, x):
