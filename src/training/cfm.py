@@ -18,7 +18,7 @@ from torchdiffeq import odeint
 
 
 class ModelWrapper(nn.Module):
-    def __init__(self, base_model):
+    def __init__(self, base_model, max_len=10, device="cpu"):
         """
         Wraps a base model to only evolve the first part of the input specifying a certain context using the model.
 
@@ -27,9 +27,11 @@ class ModelWrapper(nn.Module):
         """
         super(ModelWrapper, self).__init__()
         self.base_model = base_model.eval()
+        self.device = device
         self.feature_size = base_model.feature_size
+        self.max_len = max_len
 
-    def forward(self, t, x, **kwargs):
+    def forward(self, t, x, pu, nfakes, key_padding_mask, **kwargs):
         """
         Forward pass of the wrapped model.
 
@@ -42,42 +44,39 @@ class ModelWrapper(nn.Module):
         Returns:
             torch.Tensor: The output tensor.
         """
-        seq_len = x.shape[1]
-        xt, pu, nfakes, curr_obj = x[:, :seq_len-3, :], x[:, seq_len-2, 0], x[:, seq_len -1, 0], x[:, seq_len, 0]
-        # t_broadcasted = t.expand(x.shape[0], 1)
-        # Only evolve xt using the model, key_padding mask is None
-        dxt_dt = self.base_model(xt, pu, nfakes, t, None)
 
-        # Concatenate the derivatives of xt with zeros for context to keep their values unchanged
-        zeros_for_context = torch.zeros_like(x)
+        key_padding_mask = key_padding_mask.bool()
+        # Only evolve xt using the model
+        t_broadcasted = t.expand(x.shape[0], 1)
+        dxt_dt = self.base_model(x, pu, nfakes, t_broadcasted, key_padding_mask)
 
-        dx_dt = torch.cat([dxt_dt, zeros_for_context], dim=1)
+        dx_dt = dxt_dt # zeros_for_context
 
         return dx_dt
     
-    def generate(self, pu, nfakes, max_len=10, timesteps=100, solver="euler"):
-        t = torch.linspace(0, 1, timesteps)
-        for i in range(nfakes.shape[0]):
-            curr_obj = 0
-            for j in nfakes[i]:
-                if j > max_len:
-                    j = max_len
-                x = torch.randn(1, j, self.feature_size)
-                pu_zeros = torch.zeros_like(x)
-                nfakes_zeros = torch.zeros_like(x)
-                curr_obj_zeros = torch.zeros_like(x)
-                pu_zeros[:, :, 0] = pu[i]
-                nfakes_zeros[:, :, 0] = j
-                curr_obj_zeros[:, :, 0] = curr_obj
-                initial_conditions = torch.cat([x, pu_zeros, nfakes_zeros], dim=1)
-                sample = odeint(self,
-                                initial_conditions,
-                                t,
-                                atol=1e-5,
-                                rtol=1e-5,
-                                method=solver,
-                                )
-                print(sample.shape)
+    def generate(self, pu, nfakes, key_padding_mask, t_span, solver="euler"):
+        self.base_model.eval()
+
+        initial_conditions = torch.randn(len(pu), self.max_len, self.feature_size)
+        # pu_zeros = torch.zeros_like(x)
+        # nfakes_zeros = torch.zeros_like(x)
+        # pu_zeros[:, :, 0] = pu
+        # nfakes_zeros[:, :, 0] = nfakes
+        # initial_conditions = torch.cat([x, pu_zeros, nfakes_zeros, key_padding_mask], dim=2)
+        initial_conditions = initial_conditions.to(self.device)
+        pu = pu.to(self.device)
+        nfakes = nfakes.to(self.device)
+        key_padding_mask = key_padding_mask.to(self.device)
+
+        sample = odeint(lambda t, x: self(t, x, pu, nfakes, key_padding_mask),
+                        initial_conditions,
+                        t_span,
+                        atol=1e-6,
+                        rtol=1e-6,
+                        method=solver,
+                        )[-1, :, :]
+        # print(sample.shape)
+        return sample
         
 
 
